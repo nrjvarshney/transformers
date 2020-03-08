@@ -266,6 +266,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
         eval_loss = 0.0
         nb_eval_steps = 0
         preds = None
+        output_logit_list = []
         out_label_ids = None
         for batch in tqdm(eval_dataloader, desc="Evaluating"):
             model.eval()
@@ -285,6 +286,7 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
 
                 eval_loss += tmp_eval_loss.mean().item()
             nb_eval_steps += 1
+            output_logit_list += logits
             if preds is None:
                 preds = logits.detach().cpu().numpy()
                 out_label_ids = inputs["labels"].detach().cpu().numpy()
@@ -314,9 +316,12 @@ def evaluate(args, model, tokenizer, prefix="", test=False):
             writer.write("train num epochs=%d\n" % args.num_train_epochs)
             writer.write("fp16            =%s\n" % args.fp16)
             writer.write("max seq length  =%d\n" % args.max_seq_length)
+            for ele in output_logit_list:
+                writer.write("%s\n" % ele)
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (key, str(result[key])))
+        
     return results
 
 
