@@ -19,6 +19,7 @@
 import logging
 
 import torch
+import math
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss, MSELoss
 
@@ -26,7 +27,7 @@ from .configuration_roberta import RobertaConfig
 from .file_utils import add_start_docstrings, add_start_docstrings_to_callable
 from .modeling_bert import BertEmbeddings, BertLayerNorm, BertModel, BertPreTrainedModel, gelu
 from .modeling_utils import create_position_ids_from_input_ids
-
+import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
@@ -444,7 +445,6 @@ class RobertaForMultipleChoice(BertPreTrainedModel):
             head_mask=head_mask,
         )
         pooled_output = outputs[1]
-
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
         reshaped_logits = logits.view(-1, num_choices)
@@ -458,7 +458,404 @@ class RobertaForMultipleChoice(BertPreTrainedModel):
 
         return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
 
+@add_start_docstrings(
+    """Roberta Model with a multiple choice classification head on top (a linear layer on top of
+    the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ROBERTA_START_DOCSTRING,
+)
+class RobertaForMultipleChoice_Custom3(BertPreTrainedModel):
+    config_class = RobertaConfig
+    pretrained_model_archive_map = ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
+    base_model_prefix = "roberta"
+    
+    def __init__(self, config):
+        super().__init__(config)
 
+        self.roberta = RobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.weights = nn.Linear(5*1024, 1)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.classifier2 = nn.Linear(5, 5)
+        self.option_weights = nn.Linear(4,1)
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ROBERTA_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        attention_mask=None,
+        labels=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+    ):
+        
+        num_choices = input_ids.shape[1]
+        batch_size = input_ids.shape[0]
+        options_mask = torch.zeros(num_choices,batch_size,num_choices, device = input_ids.device)
+        for i in range(num_choices):
+            options_mask[i,:,i].fill_(1)
+
+        flat_input_ids = input_ids.view(-1, input_ids.size(-1))
+        flat_position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        outputs = self.roberta(
+            flat_input_ids,
+            position_ids=flat_position_ids,
+            token_type_ids=flat_token_type_ids,
+            attention_mask=flat_attention_mask,
+            head_mask=head_mask,
+        )
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+        reshaped_logits = logits.view(-1, num_choices) # 4X5
+
+        pooled_output = pooled_output.view(-1,num_choices, 1024)
+        self.weights((pooled_output * (options_mask[0].unsqueeze(2) + options_mask[1].unsqueeze(2))).view(-1,5*1024))
+        
+        o1o2 = self.weights((pooled_output * (options_mask[0].unsqueeze(2) + options_mask[1].unsqueeze(2))).view(-1,5*1024))
+        o1o3 = self.weights((pooled_output * (options_mask[0].unsqueeze(2) + options_mask[2].unsqueeze(2))).view(-1,5*1024))
+        o1o4 = self.weights((pooled_output * (options_mask[0].unsqueeze(2) + options_mask[3].unsqueeze(2))).view(-1,5*1024))
+        o1o5 = self.weights((pooled_output * (options_mask[0].unsqueeze(2) + options_mask[4].unsqueeze(2))).view(-1,5*1024))
+
+        o2o1 = self.weights((pooled_output * (options_mask[1].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o2o3 = self.weights((pooled_output * (options_mask[1].unsqueeze(2) + options_mask[2].unsqueeze(2))).view(-1,5*1024))
+        o2o4 = self.weights((pooled_output * (options_mask[1].unsqueeze(2) + options_mask[3].unsqueeze(2))).view(-1,5*1024))
+        o2o5 = self.weights((pooled_output * (options_mask[1].unsqueeze(2) + options_mask[4].unsqueeze(2))).view(-1,5*1024))
+
+        o3o1 = self.weights((pooled_output * (options_mask[2].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o3o2 = self.weights((pooled_output * (options_mask[2].unsqueeze(2) + options_mask[1].unsqueeze(2))).view(-1,5*1024))
+        o3o4 = self.weights((pooled_output * (options_mask[2].unsqueeze(2) + options_mask[3].unsqueeze(2))).view(-1,5*1024))
+        o3o5 = self.weights((pooled_output * (options_mask[2].unsqueeze(2) + options_mask[4].unsqueeze(2))).view(-1,5*1024))
+
+        o4o1 = self.weights((pooled_output * (options_mask[3].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o4o2 = self.weights((pooled_output * (options_mask[3].unsqueeze(2) + options_mask[1].unsqueeze(2))).view(-1,5*1024))
+        o4o3 = self.weights((pooled_output * (options_mask[3].unsqueeze(2) + options_mask[2].unsqueeze(2))).view(-1,5*1024))
+        o4o5 = self.weights((pooled_output * (options_mask[3].unsqueeze(2) + options_mask[4].unsqueeze(2))).view(-1,5*1024))
+
+        o5o1 = self.weights((pooled_output * (options_mask[4].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o5o2 = self.weights((pooled_output * (options_mask[4].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o5o3 = self.weights((pooled_output * (options_mask[4].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+        o5o4 = self.weights((pooled_output * (options_mask[4].unsqueeze(2) + options_mask[0].unsqueeze(2))).view(-1,5*1024))
+
+        overall_option = torch.cat(
+            [o1o2, o1o3, o1o4, o1o5, o2o1, o2o3, o2o4, o2o5, o3o1, o3o2, o3o4, o3o5, o4o1, o4o2, o4o3, o4o5, o5o1, o5o2, o5o3, o5o4], dim = 1) # 4 X 20
+        overall_option = overall_option.view(batch_size, num_choices, num_choices-1) # 4 X 5 X 4
+#         W = torch.Tensor(4).fill_(0.15).view(num_choices-1, 1)
+#         W = W.to(input_ids.device)
+#         result = torch.bmm(overall_option, W.unsqueeze(0).expand(overall_option.size(0), *W.size())) # 4 X 5
+        result = self.option_weights(overall_option)
+        reshaped_logits += result.view(-1,num_choices)
+        
+        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+
+@add_start_docstrings(
+    """Roberta Model with a multiple choice classification head on top (a linear layer on top of
+    the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ROBERTA_START_DOCSTRING,
+)
+class RobertaForMultipleChoice_Custom2(BertPreTrainedModel):
+    config_class = RobertaConfig
+    pretrained_model_archive_map = ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
+    base_model_prefix = "roberta"
+    
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.roberta = RobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.classifier2 = nn.Linear(5, 5)
+        self.classifier3 = nn.Linear(5, 5)
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ROBERTA_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        attention_mask=None,
+        labels=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+    ):
+        
+        num_choices = input_ids.shape[1]
+
+        flat_input_ids = input_ids.view(-1, input_ids.size(-1))
+        flat_position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        outputs = self.roberta(
+            flat_input_ids,
+            position_ids=flat_position_ids,
+            token_type_ids=flat_token_type_ids,
+            attention_mask=flat_attention_mask,
+            head_mask=head_mask,
+        )
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.classifier(pooled_output)
+        reshaped_logits = logits.view(-1, num_choices)
+        reshaped_logits = self.classifier2(reshaped_logits)
+#         reshaped_logits = F.relu(self.classifier2(reshaped_logits))
+#         reshaped_logits = self.classifier3(reshaped_logits)
+        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+
+class GeLU(nn.Module):
+    def __init__(self):
+        super(GeLU, self).__init__()
+
+    def forward(self, x):
+        return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+    
+@add_start_docstrings(
+    """Roberta Model with a multiple choice classification head on top (a linear layer on top of
+    the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ROBERTA_START_DOCSTRING,
+)
+class RobertaForMultipleChoice_SAE(BertPreTrainedModel):
+    config_class = RobertaConfig
+    pretrained_model_archive_map = ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
+    base_model_prefix = "roberta"
+
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.roberta = RobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+
+        self.hidden_size = int(config.hidden_size/2)
+        self.sent_selfatt = nn.Sequential(nn.Linear(config.hidden_size, self.hidden_size), GeLU(), 
+                        self.dropout, nn.Linear(self.hidden_size, 1))
+        
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ROBERTA_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        attention_mask=None,
+        labels=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+    ):
+        r"""
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`, defaults to :obj:`None`):
+            Labels for computing the multiple choice classification loss.
+            Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+            of the input tensors. (see `input_ids` above)
+
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.RobertaConfig`) and inputs:
+        loss (:obj:`torch.FloatTensor`` of shape ``(1,)`, `optional`, returned when :obj:`labels` is provided):
+            Classification loss.
+        classification_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, num_choices)`):
+            `num_choices` is the second dimension of the input tensors. (see `input_ids` above).
+
+            Classification scores (before SoftMax).
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+
+    Examples::
+
+        from transformers import RobertaTokenizer, RobertaForMultipleChoice
+        import torch
+
+        tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+        model = RobertaForMultipleChoice.from_pretrained('roberta-base')
+        choices = ["Hello, my dog is cute", "Hello, my cat is amazing"]
+        input_ids = torch.tensor([tokenizer.encode(s, add_special_tokens=True) for s in choices]).unsqueeze(0)  # Batch size 1, 2 choices
+        labels = torch.tensor(1).unsqueeze(0)  # Batch size 1
+        outputs = model(input_ids, labels=labels)
+        loss, classification_scores = outputs[:2]
+
+        """
+        num_choices = input_ids.shape[1]
+
+        flat_input_ids = input_ids.view(-1, input_ids.size(-1))
+        flat_position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        outputs = self.roberta(
+            flat_input_ids,
+            position_ids=flat_position_ids,
+            token_type_ids=flat_token_type_ids,
+            attention_mask=flat_attention_mask,
+            head_mask=head_mask,
+        )
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        logits = self.sent_selfatt(pooled_output)
+        reshaped_logits = logits.view(-1, num_choices)
+
+        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+
+@add_start_docstrings(
+    """Roberta Model (custom) with a multiple choice classification head on top (a linear layer on top of
+    the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ROBERTA_START_DOCSTRING,
+)
+class RobertaForMultipleChoice_Custom(BertPreTrainedModel):
+    config_class = RobertaConfig
+    pretrained_model_archive_map = ROBERTA_PRETRAINED_MODEL_ARCHIVE_MAP
+    base_model_prefix = "roberta"
+
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.roberta = RobertaModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        
+#         self.classifier2 = nn.Linear( int(config.hidden_size/4), 1)
+#         self.hidden_size = int(config.hidden_size/2)
+#         self.classifier3 = nn.Sequential(nn.Linear(config.hidden_size, self.hidden_size), GeLU(), 
+#                         nn.Dropout(self.dropout), nn.Linear(self.hidden_size, 1))
+
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ROBERTA_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        token_type_ids=None,
+        attention_mask=None,
+        labels=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+    ):
+        r"""
+        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`, defaults to :obj:`None`):
+            Labels for computing the multiple choice classification loss.
+            Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
+            of the input tensors. (see `input_ids` above)
+
+    Returns:
+        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.RobertaConfig`) and inputs:
+        loss (:obj:`torch.FloatTensor`` of shape ``(1,)`, `optional`, returned when :obj:`labels` is provided):
+            Classification loss.
+        classification_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, num_choices)`):
+            `num_choices` is the second dimension of the input tensors. (see `input_ids` above).
+
+            Classification scores (before SoftMax).
+        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
+            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
+
+            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
+        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
+            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
+            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
+
+            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
+            heads.
+
+    Examples::
+
+        from transformers import RobertaTokenizer, RobertaForMultipleChoice
+        import torch
+
+        tokenizer = RobertaTokenizer.from_pretrained('roberta-base')
+        model = RobertaForMultipleChoice.from_pretrained('roberta-base')
+        choices = ["Hello, my dog is cute", "Hello, my cat is amazing"]
+        input_ids = torch.tensor([tokenizer.encode(s, add_special_tokens=True) for s in choices]).unsqueeze(0)  # Batch size 1, 2 choices
+        labels = torch.tensor(1).unsqueeze(0)  # Batch size 1
+        outputs = model(input_ids, labels=labels)
+        loss, classification_scores = outputs[:2]
+
+        """
+        num_choices = input_ids.shape[1]
+
+        flat_input_ids = input_ids.view(-1, input_ids.size(-1))
+        flat_position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        outputs = self.roberta(
+            flat_input_ids,
+            position_ids=flat_position_ids,
+            token_type_ids=flat_token_type_ids,
+            attention_mask=flat_attention_mask,
+            head_mask=head_mask,
+        )
+        pooled_output = outputs[1]
+        pooled_output = self.dropout(pooled_output)
+        # 20 X 1024
+        pooled_output = pooled_output.view(-1, num_choices, 1024) # 4 X 5 X 1024
+        number_of_questions = pooled_output.shape[0]  # 4
+        all_scores = torch.zeros(number_of_questions, num_choices, device = input_ids.device)
+        for question in range(number_of_questions):
+            question_tensor = pooled_output[question] # 5 X 1024
+            for option1 in range(num_choices):
+                for option2 in range(option1+1, num_choices):
+                    option1_tensor = question_tensor[option1]
+                    option1_tensor = option1_tensor.view(-1, 1024) # 1 X 1024
+                    option2_tensor = question_tensor[option2]
+                    option2_tensor = option2_tensor.view(-1, 1024)
+                    
+                    combined_options = torch.cat((option1_tensor, option2_tensor),0) # 2 X 1024
+                    # pass it through 1024 X 1 to get 2 X 1 
+                    logits = self.classifier(combined_options)
+                    reshaped_logits_2 = logits.view(2,1)
+                    all_scores[question][option1] += reshaped_logits_2[0]
+                    all_scores[question][option2] += reshaped_logits_2[1]
+
+        logits = all_scores
+        reshaped_logits = logits.view(-1, num_choices)
+        
+        outputs = (reshaped_logits,) + outputs[1:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+
+
+    
 @add_start_docstrings(
     """Roberta Model with a token classification head on top (a linear layer on top of
     the hidden-states output) e.g. for Named-Entity-Recognition (NER) tasks. """,

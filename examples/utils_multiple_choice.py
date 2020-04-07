@@ -216,7 +216,10 @@ class CommonSenseQAProcessor(DataProcessor):
     def get_test_examples(self, data_dir):
         logger.info("LOOKING AT {} test".format(data_dir))
         return self._create_examples(self._read_json(os.path.join(data_dir, "test.jsonl")), "test")
-
+    
+    def process_these_examples(self, lines):
+        return self._create_examples(lines, "dev")
+    
     def get_labels(self):
         """See base class."""
         return ["0", "1", "2", "3", "4"]
