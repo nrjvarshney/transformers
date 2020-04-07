@@ -16,13 +16,11 @@ from .utils import require_tf, require_torch, slow
 
 QA_FINETUNED_MODELS = [
     (("bert-base-uncased", {"use_fast": False}), "bert-large-uncased-whole-word-masking-finetuned-squad", None),
-    (("bert-base-cased", {"use_fast": False}), "bert-large-cased-whole-word-masking-finetuned-squad", None),
     (("bert-base-cased", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
 ]
 
 TF_QA_FINETUNED_MODELS = [
     (("bert-base-uncased", {"use_fast": False}), "bert-large-uncased-whole-word-masking-finetuned-squad", None),
-    (("bert-base-cased", {"use_fast": False}), "bert-large-cased-whole-word-masking-finetuned-squad", None),
     (("bert-base-cased", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
 ]
 
@@ -49,7 +47,6 @@ FEATURE_EXTRACT_FINETUNED_MODELS = {
 }
 
 TF_FEATURE_EXTRACT_FINETUNED_MODELS = {
-    ("bert-base-cased", "bert-base-cased", None),
     # ('xlnet-base-cased', 'xlnet-base-cased', None), # Disabled for now as it crash for TF2
     ("distilbert-base-cased", "distilbert-base-cased", None),
 }
@@ -64,7 +61,7 @@ TF_TEXT_CLASSIF_FINETUNED_MODELS = {
 
 TEXT_CLASSIF_FINETUNED_MODELS = {
     (
-        "bert-base-uncased",
+        "distilbert-base-cased",
         "distilbert-base-uncased-finetuned-sst-2-english",
         "distilbert-base-uncased-finetuned-sst-2-english",
     )
@@ -77,6 +74,18 @@ FILL_MASK_FINETUNED_MODELS = [
 TF_FILL_MASK_FINETUNED_MODELS = [
     (("distilroberta-base", {"use_fast": False}), "distilroberta-base", None),
 ]
+
+SUMMARIZATION_FINETUNED_MODELS = {
+    ("sshleifer/bart-tiny-random", "bart-large-cnn"),
+    ("patrickvonplaten/t5-tiny-random", "t5-small"),
+}
+TF_SUMMARIZATION_FINETUNED_MODELS = {("patrickvonplaten/t5-tiny-random", "t5-small")}
+
+TRANSLATION_FINETUNED_MODELS = {
+    ("patrickvonplaten/t5-tiny-random", "t5-small", "translation_en_to_de"),
+    ("patrickvonplaten/t5-tiny-random", "t5-small", "translation_en_to_ro"),
+}
+TF_TRANSLATION_FINETUNED_MODELS = {("patrickvonplaten/t5-tiny-random", "t5-small", "translation_en_to_fr")}
 
 
 class MonoColumnInputTestCase(unittest.TestCase):
@@ -247,6 +256,50 @@ class MonoColumnInputTestCase(unittest.TestCase):
                 expected_check_keys=["sequence"],
             )
 
+    @require_torch
+    def test_summarization(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [4, "<mask>"]
+        mandatory_keys = ["summary_text"]
+        for model, tokenizer in SUMMARIZATION_FINETUNED_MODELS:
+            nlp = pipeline(task="summarization", model=model, tokenizer=tokenizer)
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, mandatory_keys,
+            )
+
+    @require_tf
+    def test_tf_summarization(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [4, "<mask>"]
+        mandatory_keys = ["summary_text"]
+        for model, tokenizer in TF_SUMMARIZATION_FINETUNED_MODELS:
+            nlp = pipeline(task="summarization", model=model, tokenizer=tokenizer, framework="tf")
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, mandatory_keys,
+            )
+
+    @require_torch
+    def test_translation(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [4, "<mask>"]
+        mandatory_keys = ["translation_text"]
+        for model, tokenizer, task in TRANSLATION_FINETUNED_MODELS:
+            nlp = pipeline(task=task, model=model, tokenizer=tokenizer)
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, mandatory_keys,
+            )
+
+    @require_tf
+    def test_tf_translation(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [4, "<mask>"]
+        mandatory_keys = ["translation_text"]
+        for model, tokenizer, task in TF_TRANSLATION_FINETUNED_MODELS:
+            nlp = pipeline(task=task, model=model, tokenizer=tokenizer, framework="tf")
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, mandatory_keys,
+            )
+
 
 class MultiColumnInputTestCase(unittest.TestCase):
     def _test_multicolumn_pipeline(self, nlp, valid_inputs: list, invalid_inputs: list, output_keys: Iterable[str]):
@@ -291,7 +344,7 @@ class MultiColumnInputTestCase(unittest.TestCase):
             self._test_multicolumn_pipeline(nlp, valid_samples, invalid_samples, mandatory_output_keys)
 
     @require_tf
-    @unittest.skip("This test is failing intermittently. Skipping it until we resolve.")
+    @slow
     def test_tf_question_answering(self):
         mandatory_output_keys = {"score", "answer", "start", "end"}
         valid_samples = [
