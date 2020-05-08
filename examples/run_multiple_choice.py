@@ -36,6 +36,9 @@ from transformers import (
     BertTokenizer,
     RobertaConfig,
     RobertaForMultipleChoice,
+    AlbertConfig,
+    AlbertForMultipleChoice,
+    AlbertTokenizer,
     RobertaTokenizer,
     XLNetConfig,
     XLNetForMultipleChoice,
@@ -60,6 +63,7 @@ ALL_MODELS = sum(
 MODEL_CLASSES = {
     "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
+    "albert": (AlbertConfig, AlbertForMultipleChoice, AlbertTokenizer),
     "roberta": (RobertaConfig, RobertaForMultipleChoice, RobertaTokenizer),
 }
 
@@ -585,6 +589,7 @@ def main():
         args.config_name if args.config_name else args.model_name_or_path,
         num_labels=num_labels,
         finetuning_task=args.task_name,
+        output_hidden_states=True,
         cache_dir=args.cache_dir if args.cache_dir else None,
     )
     tokenizer = tokenizer_class.from_pretrained(

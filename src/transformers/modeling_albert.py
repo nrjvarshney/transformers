@@ -787,22 +787,18 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
 
-@add_start_docstrings(
-    """Albert Model with a multiple choice classification head on top (a linear layer on top of the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
-    ALBERT_START_DOCSTRING,
-)
-class AlbertForMultipleChoice(AlbertPreTrainedModel):
+
+class AlbertForMultipleChoice_2_way(AlbertPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
         self.albert = AlbertModel(config)
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-#         self.classifier = nn.Linear(config.hidden_size, 1)
-        self.classifier2 = nn.Linear(4*config.hidden_size, 1)
+        self.classifier_1 = nn.Linear(4*config.hidden_size, 1)
+        self.classifier_2 = nn.Linear(4*config.hidden_size, 1)
 
         self.init_weights()
 
-    @add_start_docstrings_to_callable(ALBERT_INPUTS_DOCSTRING)
     def forward(
         self,
         input_ids=None,
@@ -813,38 +809,7 @@ class AlbertForMultipleChoice(AlbertPreTrainedModel):
         inputs_embeds=None,
         labels=None,
     ):
-        r"""
-        labels (:obj:`torch.LongTensor` of shape :obj:`(batch_size,)`, `optional`, defaults to :obj:`None`):
-            Labels for computing the multiple choice classification loss.
-            Indices should be in ``[0, ..., num_choices]`` where `num_choices` is the size of the second dimension
-            of the input tensors. (see `input_ids` above)
-    Returns:
-        :obj:`tuple(torch.FloatTensor)` comprising various elements depending on the configuration (:class:`~transformers.BertConfig`) and inputs:
-        loss (:obj:`torch.FloatTensor` of shape `(1,)`, `optional`, returned when :obj:`labels` is provided):
-            Classification loss.
-        classification_scores (:obj:`torch.FloatTensor` of shape :obj:`(batch_size, num_choices)`):
-            `num_choices` is the second dimension of the input tensors. (see `input_ids` above).
-            Classification scores (before SoftMax).
-        hidden_states (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_hidden_states=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for the output of the embeddings + one for the output of each layer)
-            of shape :obj:`(batch_size, sequence_length, hidden_size)`.
-            Hidden-states of the model at the output of each layer plus the initial embedding outputs.
-        attentions (:obj:`tuple(torch.FloatTensor)`, `optional`, returned when ``config.output_attentions=True``):
-            Tuple of :obj:`torch.FloatTensor` (one for each layer) of shape
-            :obj:`(batch_size, num_heads, sequence_length, sequence_length)`.
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    Examples::
-        from transformers import BertTokenizer, BertForMultipleChoice
-        import torch
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        model = BertForMultipleChoice.from_pretrained('bert-base-uncased')
-        choices = ["Hello, my dog is cute", "Hello, my cat is amazing"]
-        input_ids = torch.tensor([tokenizer.encode(s, add_special_tokens=True) for s in choices]).unsqueeze(0)  # Batch size 1, 2 choices
-        labels = torch.tensor(1).unsqueeze(0)  # Batch size 1
-        outputs = model(input_ids, labels=labels)
-        loss, classification_scores = outputs[:2]
-        """
+        
         num_choices = input_ids.shape[1]
 
         input_ids = input_ids.view(-1, input_ids.size(-1))
@@ -862,6 +827,167 @@ class AlbertForMultipleChoice(AlbertPreTrainedModel):
         )
 
         pooled_output = outputs[1]
+  
+        pooled_output = self.dropout(pooled_output)
+        # new code
+        all_hidden_states = outputs[2] # 13 X 10 X 80 X 4096 for batch size 2   
+        last_four_hidden_states = list(all_hidden_states[-4:])                  
+        for i in range(len(last_four_hidden_states)):                           
+            last_four_hidden_states[i] =  last_four_hidden_states[i][:,0,:] # 10 X 80 X 4096
+                                                                                
+        desired_tensor = last_four_hidden_states[0]                             
+        for i in range(1,len(last_four_hidden_states)):                         
+            desired_tensor = torch.cat((desired_tensor, last_four_hidden_states[i]), 1)
+                                                                                
+        pooled_output = self.dropout(desired_tensor)                            
+        
+        logits = self.classifier_1(pooled_output)    # batch_size*5 X d                            
+
+
+        reshaped_logits = logits.view(-1, num_choices)  # batch_size X 5
+        _, idx = reshaped_logits.topk(2)
+        
+        mask = torch.zeros_like(reshaped_logits) 
+        mask = mask.scatter_(1, idx, 1.) # batch_size X 5
+        reshaped_pooled_output = pooled_output.view(-1,5,4*4096) # batch_size X 5 X d
+
+        masked_pooled_output = mask.unsqueeze(2)*reshaped_pooled_output # batch_size X 5 X d
+        merged_masked_pooled_output = masked_pooled_output.view(-1,4*4096) # batch_size*5 X d
+        
+        logits = self.classifier_2(merged_masked_pooled_output)    # batch_size*5 X d                            
+
+
+        reshaped_logits += logits.view(-1, num_choices)  # batch_size X 5
+        
+
+
+
+        # final batch_size X 5 should be in reshaped_logits
+        # new code ends
+        
+        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+    
+
+
+@add_start_docstrings(
+    """Albert Model with a multiple choice classification head on top (a linear layer on top of the pooled output and a softmax) e.g. for RocStories/SWAG tasks. """,
+    ALBERT_START_DOCSTRING,
+)
+
+class AlbertForMultipleChoice_CBOW(AlbertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.albert = AlbertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ALBERT_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+    ):
+        num_choices = input_ids.shape[1]
+        batch_size = input_ids.shape[0]
+        
+        input_ids = input_ids.view(-1, input_ids.size(-1))
+        attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+        
+        outputs = self.albert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+        pooled_output = outputs[1]
+        all_hidden_states = outputs[2] # 13 X 10 X 80 X 4096 for batch size 2 
+        
+        last_hidden_state = all_hidden_states[-1]
+        token_type_ids = token_type_ids.unsqueeze(2)
+        
+        res = last_hidden_state*token_type_ids
+        temp = res[0].sum(0)/torch.nonzero(res[0][:,0]).size(0)
+        temp = temp.unsqueeze(0)
+        for i in range(1, res.shape[0]):
+            my_tensor = res[i].sum(0)/torch.nonzero(res[i][:,0]).size(0)
+            my_tensor = my_tensor.unsqueeze(0)
+            temp = torch.cat((temp, my_tensor))
+
+        
+        pooled_output = self.dropout(temp)
+        logits = self.classifier(pooled_output)
+
+        reshaped_logits = logits.view(-1,num_choices)
+        outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(reshaped_logits, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), reshaped_logits, (hidden_states), (attentions)
+
+    
+
+class AlbertForMultipleChoice(AlbertPreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+
+        self.albert = AlbertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+#         self.classifier = nn.Linear(config.hidden_size, 1)
+        self.classifier2 = nn.Linear(4*config.hidden_size, 1)
+        #self.weights = nn.Linear(5*config.hidden_size,1)
+        #self.option_weights = nn.Linear(4,1)
+        self.init_weights()
+
+    @add_start_docstrings_to_callable(ALBERT_INPUTS_DOCSTRING)
+    def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        labels=None,
+    ):
+        num_choices = input_ids.shape[1]
+        batch_size = input_ids.shape[0]
+        
+        input_ids = input_ids.view(-1, input_ids.size(-1))
+        attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
+        position_ids = position_ids.view(-1, position_ids.size(-1)) if position_ids is not None else None
+
+        outputs = self.albert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+        pooled_output = outputs[1]
         all_hidden_states = outputs[2] # 13 X 10 X 80 X 4096 for batch size 2 
         last_four_hidden_states = list(all_hidden_states[-4:])
         for i in range(len(last_four_hidden_states)):
@@ -870,10 +996,10 @@ class AlbertForMultipleChoice(AlbertPreTrainedModel):
         desired_tensor = last_four_hidden_states[0]
         for i in range(1,len(last_four_hidden_states)):
             desired_tensor = torch.cat((desired_tensor, last_four_hidden_states[i]), 1)
-#         desired_tensor 10 X 16384
         
         pooled_output = self.dropout(desired_tensor)
         logits = self.classifier2(pooled_output)
+
         reshaped_logits = logits.view(-1, num_choices)
 
         outputs = (reshaped_logits,) + outputs[2:]  # add hidden states and attention if they are here

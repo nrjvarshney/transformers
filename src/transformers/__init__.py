@@ -280,6 +280,7 @@ if is_torch_available():
         AlbertForMaskedLM,
         AlbertForSequenceClassification,
         AlbertForMultipleChoice,
+        AlbertForMultipleChoice_2_way,
         AlbertForQuestionAnswering,
         AlbertForTokenClassification,
         load_tf_weights_in_albert,

@@ -149,6 +149,74 @@ class RaceProcessor(DataProcessor):
         return examples
 
 
+class DropProcessor(DataProcessor):                                             
+    """Processor for the RACE data set."""                                      
+                                                                                
+    def get_train_examples(self, data_dir):                                     
+        """See base class."""                                                   
+        logger.info("LOOKING AT {} train".format(data_dir))                     
+        high = os.path.join(data_dir, "train/high")                             
+        middle = os.path.join(data_dir, "train/middle")                         
+        high = self._read_txt(high)                                             
+        middle = self._read_txt(middle)                                         
+        return self._create_examples(high + middle, "train")                    
+                                                                                
+    def get_dev_examples(self, data_dir):                                       
+        """See base class."""                                                   
+        logger.info("LOOKING AT {} dev".format(data_dir))                       
+        lines = self._read_json(os.path.join(data_dir, "dev.json"))
+        return self._create_examples(lines, "dev")                      
+                                                                                
+    def get_test_examples(self, data_dir):                                      
+        """See base class."""                                                   
+        logger.info("LOOKING AT {} test".format(data_dir))                      
+        high = os.path.join(data_dir, "test/high")                              
+        middle = os.path.join(data_dir, "test/middle")                          
+        high = self._read_txt(high)                                             
+        middle = self._read_txt(middle)                                         
+        return self._create_examples(high + middle, "test")                     
+                                                                                
+    def get_labels(self):                                                       
+        """See base class."""                                                   
+        return ["0", "1", "2", "3"]                                             
+                                                                                
+    def _read_json(self, input_file):                                           
+        with open(input_file, "r", encoding="utf-8") as fin:                    
+            lines = fin.readlines()                                             
+            return lines   
+    def _read_txt(self, input_dir):                                             
+        lines = []                                                              
+        files = glob.glob(input_dir + "/*txt")                                  
+        for file in tqdm.tqdm(files, desc="read files"):                        
+            with open(file, "r", encoding="utf-8") as fin:                      
+                data_raw = json.load(fin)                                       
+                data_raw["race_id"] = file                                      
+                lines.append(data_raw)                                          
+        return lines
+
+
+    def _create_examples(self, lines, set_type):                                
+        """Creates examples for the training and dev sets."""                   
+        examples = []
+        for line in tqdm.tqdm(lines, desc="read DROP data"):           
+            data_raw = json.loads(line.strip("\n"))                                                            
+            query_id = "%s-%s" % (set_type, data_raw["query_id"])                 
+            context = data_raw["context"]
+            question = data_raw["question"]
+            options = data_raw["options"]
+            truth = data_raw["label"]
+            examples.append(
+                    InputExample(
+                        example_id = query_id,
+                        question = question,
+                        contexts = [context, context, context, context],
+                        endings = options,
+                        label=truth,    
+                    )
+                )                                       
+        return examples                                                         
+                                                               
+
 class SwagProcessor(DataProcessor):
     """Processor for the SWAG data set."""
 
@@ -293,6 +361,161 @@ class CommonSenseQAProcessor(DataProcessor):
         logger.info("four choices: %s", str(four_choice))
 
         return examples
+
+
+
+# Custom csqa starts
+class CommonSenseQAProcessorCustom(DataProcessor):
+    """Processor for Commonsense QA data set """
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} train".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        logger.info("LOOKING AT {} dev".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.jsonl")), "dev")
+
+    def get_test_examples(self, data_dir):
+        logger.info("LOOKING AT {} test".format(data_dir))
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.jsonl")), "test")
+    
+    def process_these_examples(self, lines):
+        return self._create_examples(lines, "dev")
+    
+    def get_labels(self):
+        """See base class."""
+        return ["0", "1"]
+
+    def _read_json(self, input_file):
+        with open(input_file, "r", encoding="utf-8") as fin:
+            lines = fin.readlines()
+            return lines
+
+    def _create_examples(self, lines, type):
+        """Creates examples for the training and dev sets."""
+
+        # There are two types of labels. They should be normalized
+        def normalize(truth):
+            if truth in "AB":
+                return ord(truth) - ord("A")
+            elif truth in "12":
+                return int(truth) - 1
+            else:
+                logger.info("truth ERROR! %s", str(truth))
+                return None
+
+        examples = []
+        # we deleted example which has more than or less than four choices
+        for line in tqdm.tqdm(lines, desc="read CommonSenseQA data"):
+            data_raw = json.loads(line.strip("\n"))
+            
+            truth = str(normalize(data_raw["answerKey"]))
+            assert truth != "None"
+            question_choices = data_raw["question"]
+            question = question_choices["stem"]
+            options = question_choices["choices"]
+            if len(options) == 2:
+                examples.append(
+                    InputExample(
+                        example_id=id,
+                        question=question,
+                        contexts=[
+                            options[0]["para"].replace("_", ""),
+                            options[1]["para"].replace("_", ""),
+                        ],
+                        endings=[options[0]["text"], options[1]["text"]],
+                        label=truth,
+                    )
+                )
+            else:
+                logger.info("Number of options : ", str(len(options)))
+        if type == "train":
+            assert len(examples) > 1
+            assert examples[0].label is not None
+        logger.info("len examples: %s}", str(len(examples)))
+        
+        return examples
+
+class CommonSenseQAProcessorCustom_3_way(DataProcessor):                              
+    """Custom Processor for Commonsense QA data set """                                
+                                                                                
+    def get_train_examples(self, data_dir):                                     
+        """See base class."""                                                   
+        logger.info("LOOKING AT {} train".format(data_dir))                     
+        return self._create_examples(self._read_json(os.path.join(data_dir, "train.jsonl")), "train")
+                                                                                
+    def get_dev_examples(self, data_dir):                                       
+        """See base class."""                                                   
+        logger.info("LOOKING AT {} dev".format(data_dir))                       
+        return self._create_examples(self._read_json(os.path.join(data_dir, "dev.jsonl")), "dev")
+                                                                                
+    def get_test_examples(self, data_dir):                                      
+        logger.info("LOOKING AT {} test".format(data_dir))                      
+        return self._create_examples(self._read_json(os.path.join(data_dir, "test.jsonl")), "test")
+                                                                                
+    def process_these_examples(self, lines):                                    
+        return self._create_examples(lines, "dev")                              
+                                                                                
+    def get_labels(self):                                                       
+        """See base class."""                                                   
+        return ["0", "1", "2"]                                                       
+                                                                                
+    def _read_json(self, input_file):                                           
+        with open(input_file, "r", encoding="utf-8") as fin:                    
+            lines = fin.readlines()                                             
+            return lines                                                        
+                                                                                
+    def _create_examples(self, lines, type):                                    
+        """Creates examples for the training and dev sets."""                   
+                                                                                
+        # There are two types of labels. They should be normalized              
+        def normalize(truth):                                                   
+            if truth in "ABC":                                                   
+                return ord(truth) - ord("A")                                    
+            elif truth in "123":                                                 
+                return int(truth) - 1                                           
+            else:                                                               
+                logger.info("truth ERROR! %s", str(truth))                      
+                return None                                                     
+                                                                                
+        examples = []                                                           
+        # we deleted example which has more than or less than four choices      
+        for line in tqdm.tqdm(lines, desc="read CommonSenseQA data"):           
+            data_raw = json.loads(line.strip("\n"))                             
+                                                                                
+            truth = str(normalize(data_raw["answerKey"]))                       
+            assert truth != "None"                                              
+            question_choices = data_raw["question"]                             
+            question = question_choices["stem"]                                 
+            options = question_choices["choices"]                               
+            if len(options) == 3:                                               
+                examples.append(                                                
+                    InputExample(                                               
+                        example_id=id,                                          
+                        question=question,                                      
+                        contexts=[                                              
+                            options[0]["para"].replace("_", ""),                
+                            options[1]["para"].replace("_", ""),
+                            options[2]["para"].replace("_", ""),
+                        ],                                                      
+                        endings=[options[0]["text"], options[1]["text"],  options[2]["text"]],       
+                        label=truth,                                            
+                    )                                                           
+                )                                                               
+            else:                                                               
+                logger.info("Number of options : ", str(len(options)))          
+        if type == "train":                                                     
+            assert len(examples) > 1                                            
+            assert examples[0].label is not None                                
+        logger.info("len examples: %s}", str(len(examples)))                    
+                                                                                
+        return examples 
+
+# Custom csqa ends
+
 
 
 class ArcProcessor(DataProcessor):
@@ -464,7 +687,7 @@ def convert_examples_to_features(
     return features
 
 
-processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, "csqa": CommonSenseQAProcessor}
+processors = {"race": RaceProcessor, "swag": SwagProcessor, "arc": ArcProcessor, "csqa": CommonSenseQAProcessor, "csqa_custom": CommonSenseQAProcessorCustom, "csqa_custom_3_way":CommonSenseQAProcessorCustom_3_way, "drop": DropProcessor}
 
 
-MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4, "csqa", 5}
+MULTIPLE_CHOICE_TASKS_NUM_LABELS = {"race", 4, "swag", 4, "arc", 4, "csqa", 5, "csqa_custom", 2, "csqa_custom_3_way", 3, "drop", 4}

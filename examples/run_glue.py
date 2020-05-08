@@ -28,6 +28,11 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm, trange
+import sys                                                                      
+#print(sys.path)                                                                 
+sys.path.insert(0,"/home/nvarshn2/Neeraj/transformers")                         
+sys.path.insert(0,"/home/nvarshn2/Neeraj/transformers/src")                     
+sys.path.insert(0,"/home/nvarshn2/Neeraj/transformers/src/transformers") 
 
 from transformers import (
     MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING,
@@ -567,6 +572,7 @@ def main():
 
     # Prepare GLUE task
     args.task_name = args.task_name.lower()
+    #print(processors)
     if args.task_name not in processors:
         raise ValueError("Task not found: %s" % (args.task_name))
     processor = processors[args.task_name]()
