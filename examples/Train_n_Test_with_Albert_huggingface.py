@@ -45,6 +45,7 @@ from transformers import (
     XLNetTokenizer,
     AlbertConfig,
     AlbertForMultipleChoice,
+    AlbertForMultipleChoice_2_way,
     AlbertTokenizer,
     get_linear_schedule_with_warmup,
 )
@@ -69,7 +70,7 @@ MODEL_CLASSES = {
     "bert": (BertConfig, BertForMultipleChoice, BertTokenizer),
     "xlnet": (XLNetConfig, XLNetForMultipleChoice, XLNetTokenizer),
     "roberta": (RobertaConfig, RobertaForMultipleChoice_Custom3, RobertaTokenizer),
-    "albert": (AlbertConfig, AlbertForMultipleChoice, AlbertTokenizer),
+    "albert": (AlbertConfig, AlbertForMultipleChoice_2_way, AlbertTokenizer),
 }
 
 
@@ -446,17 +447,17 @@ args = {
 
 args["model_type"] = "albert"
 args["task_name"] = "csqa"
-# args["model_name_or_path"] = "./csqa_roberta_large_result/"
+# args["model_name_or_path"] = "./csqa_albert_2_way_result/"
 args["model_name_or_path"] = "albert-xxlarge-v2"
 args["do_eval"] = True
 args["do_train"] = True
 args["do_lower_case"] = True
 
 args["max_seq_length"] = 80
-args["learning_rate"] = 1e-5
+args["learning_rate"] = 5e-6
 args["num_train_epochs"] = 4
 args["data_dir"] = "./common_sense_data/"
-args["output_dir"] = "./csqa_result"
+args["output_dir"] = "./csqa_albert_single_model_2_way/"
 args["per_gpu_eval_batch_size"] = 2
 args["per_gpu_train_batch_size"] = 2
 args["gradient_accumulation_steps"] = 4
