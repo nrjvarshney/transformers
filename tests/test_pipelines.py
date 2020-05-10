@@ -2,26 +2,19 @@ import unittest
 from typing import Iterable, List, Optional
 
 from transformers import pipeline
-from transformers.pipelines import (
-    FeatureExtractionPipeline,
-    FillMaskPipeline,
-    NerPipeline,
-    Pipeline,
-    QuestionAnsweringPipeline,
-    TextClassificationPipeline,
-)
+from transformers.pipelines import DefaultArgumentHandler, Pipeline
 
 from .utils import require_tf, require_torch, slow
 
 
 QA_FINETUNED_MODELS = [
     (("bert-base-uncased", {"use_fast": False}), "bert-large-uncased-whole-word-masking-finetuned-squad", None),
-    (("bert-base-cased", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
+    (("distilbert-base-cased-distilled-squad", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
 ]
 
 TF_QA_FINETUNED_MODELS = [
     (("bert-base-uncased", {"use_fast": False}), "bert-large-uncased-whole-word-masking-finetuned-squad", None),
-    (("bert-base-cased", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
+    (("distilbert-base-cased-distilled-squad", {"use_fast": False}), "distilbert-base-cased-distilled-squad", None),
 ]
 
 TF_NER_FINETUNED_MODELS = {
@@ -67,6 +60,16 @@ TEXT_CLASSIF_FINETUNED_MODELS = {
     )
 }
 
+TEXT_GENERATION_FINETUNED_MODELS = {
+    ("gpt2", "gpt2"),
+    ("xlnet-base-cased", "xlnet-base-cased"),
+}
+
+TF_TEXT_GENERATION_FINETUNED_MODELS = {
+    ("gpt2", "gpt2"),
+    ("xlnet-base-cased", "xlnet-base-cased"),
+}
+
 FILL_MASK_FINETUNED_MODELS = [
     (("distilroberta-base", {"use_fast": False}), "distilroberta-base", None),
 ]
@@ -86,6 +89,78 @@ TRANSLATION_FINETUNED_MODELS = {
     ("patrickvonplaten/t5-tiny-random", "t5-small", "translation_en_to_ro"),
 }
 TF_TRANSLATION_FINETUNED_MODELS = {("patrickvonplaten/t5-tiny-random", "t5-small", "translation_en_to_fr")}
+
+
+class DefaultArgumentHandlerTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self.handler = DefaultArgumentHandler()
+
+    def test_kwargs_x(self):
+        mono_data = {"X": "This is a sample input"}
+        mono_args = self.handler(**mono_data)
+
+        self.assertTrue(isinstance(mono_args, list))
+        self.assertEqual(len(mono_args), 1)
+
+        multi_data = {"x": ["This is a sample input", "This is a second sample input"]}
+        multi_args = self.handler(**multi_data)
+
+        self.assertTrue(isinstance(multi_args, list))
+        self.assertEqual(len(multi_args), 2)
+
+    def test_kwargs_data(self):
+        mono_data = {"data": "This is a sample input"}
+        mono_args = self.handler(**mono_data)
+
+        self.assertTrue(isinstance(mono_args, list))
+        self.assertEqual(len(mono_args), 1)
+
+        multi_data = {"data": ["This is a sample input", "This is a second sample input"]}
+        multi_args = self.handler(**multi_data)
+
+        self.assertTrue(isinstance(multi_args, list))
+        self.assertEqual(len(multi_args), 2)
+
+    def test_multi_kwargs(self):
+        mono_data = {"data": "This is a sample input", "X": "This is a sample input 2"}
+        mono_args = self.handler(**mono_data)
+
+        self.assertTrue(isinstance(mono_args, list))
+        self.assertEqual(len(mono_args), 2)
+
+        multi_data = {
+            "data": ["This is a sample input", "This is a second sample input"],
+            "test": ["This is a sample input 2", "This is a second sample input 2"],
+        }
+        multi_args = self.handler(**multi_data)
+
+        self.assertTrue(isinstance(multi_args, list))
+        self.assertEqual(len(multi_args), 4)
+
+    def test_args(self):
+        mono_data = "This is a sample input"
+        mono_args = self.handler(mono_data)
+
+        self.assertTrue(isinstance(mono_args, list))
+        self.assertEqual(len(mono_args), 1)
+
+        mono_data = ["This is a sample input"]
+        mono_args = self.handler(mono_data)
+
+        self.assertTrue(isinstance(mono_args, list))
+        self.assertEqual(len(mono_args), 1)
+
+        multi_data = ["This is a sample input", "This is a second sample input"]
+        multi_args = self.handler(multi_data)
+
+        self.assertTrue(isinstance(multi_args, list))
+        self.assertEqual(len(multi_args), 2)
+
+        multi_data = ["This is a sample input", "This is a second sample input"]
+        multi_args = self.handler(*multi_data)
+
+        self.assertTrue(isinstance(multi_args, list))
+        self.assertEqual(len(multi_args), 2)
 
 
 class MonoColumnInputTestCase(unittest.TestCase):
@@ -300,6 +375,26 @@ class MonoColumnInputTestCase(unittest.TestCase):
                 nlp, valid_inputs, invalid_inputs, mandatory_keys,
             )
 
+    @require_torch
+    def test_text_generation(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [None]
+        for model, tokenizer in TEXT_GENERATION_FINETUNED_MODELS:
+            nlp = pipeline(task="text-generation", model=model, tokenizer=tokenizer, framework="pt")
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, {},
+            )
+
+    @require_tf
+    def test_tf_text_generation(self):
+        valid_inputs = ["A string like this", ["list of strings entry 1", "list of strings v2"]]
+        invalid_inputs = [None]
+        for model, tokenizer in TF_TEXT_GENERATION_FINETUNED_MODELS:
+            nlp = pipeline(task="text-generation", model=model, tokenizer=tokenizer, framework="tf")
+            self._test_mono_column_pipeline(
+                nlp, valid_inputs, invalid_inputs, {},
+            )
+
 
 class MultiColumnInputTestCase(unittest.TestCase):
     def _test_multicolumn_pipeline(self, nlp, valid_inputs: list, invalid_inputs: list, output_keys: Iterable[str]):
@@ -369,25 +464,30 @@ class MultiColumnInputTestCase(unittest.TestCase):
 class PipelineCommonTests(unittest.TestCase):
 
     pipelines = (
-        NerPipeline,
-        FeatureExtractionPipeline,
-        QuestionAnsweringPipeline,
-        FillMaskPipeline,
-        TextClassificationPipeline,
+        "ner",
+        "feature-extraction",
+        "question-answering",
+        "fill-mask",
+        "summarization",
+        "sentiment-analysis",
+        "translation_en_to_fr",
+        "translation_en_to_de",
+        "translation_en_to_ro",
+        "text-generation",
     )
 
     @slow
     @require_tf
     def test_tf_defaults(self):
         # Test that pipelines can be correctly loaded without any argument
-        for default_pipeline in self.pipelines:
-            with self.subTest(msg="Testing Torch defaults with PyTorch and {}".format(default_pipeline.task)):
-                default_pipeline(framework="tf")
+        for task in self.pipelines:
+            with self.subTest(msg="Testing Torch defaults with PyTorch and {}".format(task)):
+                pipeline(task, framework="tf")
 
     @slow
     @require_torch
     def test_pt_defaults(self):
         # Test that pipelines can be correctly loaded without any argument
-        for default_pipeline in self.pipelines:
-            with self.subTest(msg="Testing Torch defaults with PyTorch and {}".format(default_pipeline.task)):
-                default_pipeline(framework="pt")
+        for task in self.pipelines:
+            with self.subTest(msg="Testing Torch defaults with PyTorch and {}".format(task)):
+                pipeline(task, framework="pt")
